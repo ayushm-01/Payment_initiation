@@ -1,138 +1,184 @@
-// ========== ENTITIES ==========
-
-@Entity
-public class Batch {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-    private String name;
-    private Double totalAmount;
-    private String status;
+@Service
+public class ApproverService {
     
-    public Batch() {}
+    @Autowired private BatchRepository batchRepo;
+    @Autowired private ApproverRepository approverRepo;
     
-    // Getters and Setters
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
-    public String getName() { return name; }
-    public void setName(String name) { this.name = name; }
-    public Double getTotalAmount() { return totalAmount; }
-    public void setTotalAmount(Double totalAmount) { this.totalAmount = totalAmount; }
-    public String getStatus() { return status; }
-    public void setStatus(String status) { this.status = status; }
+    // Get all pending batches for approver
+    public List<Batch> getPendingBatches() {
+        return batchRepo.findByStatus("PENDING");
+    }
+    
+    // Approver decision on multiple batches
+    public void approverDecision(List<Long> batchIds, User approver, boolean approved) {
+        for (Long batchId : batchIds) {
+            Batch batch = batchRepo.findById(batchId)
+                    .orElseThrow(() -> new RuntimeException("Batch not found"));
+            
+            // Check if approver already acted
+            if (approverRepo.findByBatchAndUser(batch, approver) != null) {
+                throw new RuntimeException("Already acted on batch: " + batchId);
+            }
+            
+            // Save approver action
+            Approver app = new Approver();
+            app.setBatch(batch);
+            app.setUser(approver);
+            app.setApproved(approved);
+            app.setLevel(1);
+            approverRepo.save(app);
+            
+            // Update batch status
+            if (approved) {
+                batch.setStatus("UNDER_JR_MANAGER_REVIEW");
+            } else {
+                batch.setStatus("REJECTED");
+            }
+            batchRepo.save(batch);
+        }
+    }
+    
+    // Get next batch for Jr Manager
+    public Batch getNextBatchForJrManager() {
+        List<Batch> batches = batchRepo.findByStatus("UNDER_JR_MANAGER_REVIEW");
+        return batches.isEmpty() ? null : batches.get(0);
+    }
+    
+    // Jr Manager decision
+    public void jrManagerDecision(Long batchId, User jrManager, boolean approved) {
+        Batch batch = batchRepo.findById(batchId)
+                .orElseThrow(() -> new RuntimeException("Batch not found"));
+        
+        // Check if already acted
+        if (approverRepo.findByBatchAndUser(batch, jrManager) != null) {
+            throw new RuntimeException("Already acted on this batch");
+        }
+        
+        // Save Jr Manager action
+        Approver app = new Approver();
+        app.setBatch(batch);
+        app.setUser(jrManager);
+        app.setApproved(approved);
+        app.setLevel(2);
+        approverRepo.save(app);
+        
+        if (!approved) {
+            batch.setStatus("REJECTED");
+        } else {
+            // Check if needs Sr Manager approval
+            if (batch.getTotalAmount() >= 100000) { // 1 Lakh or more
+                batch.setStatus("UNDER_SR_MANAGER_REVIEW");
+            } else {
+                batch.setStatus("APPROVED");
+            }
+        }
+        batchRepo.save(batch);
+    }
+    
+    // Get next batch for Sr Manager
+    public Batch getNextBatchForSrManager() {
+        List<Batch> batches = batchRepo.findByStatus("UNDER_SR_MANAGER_REVIEW");
+        return batches.isEmpty() ? null : batches.get(0);
+    }
+    
+    // Sr Manager decision
+    public void srManagerDecision(Long batchId, User srManager, boolean approved) {
+        Batch batch = batchRepo.findById(batchId)
+                .orElseThrow(() -> new RuntimeException("Batch not found"));
+        
+        // Check if already acted
+        if (approverRepo.findByBatchAndUser(batch, srManager) != null) {
+            throw new RuntimeException("Already acted on this batch");
+        }
+        
+        // Save Sr Manager action
+        Approver app = new Approver();
+        app.setBatch(batch);
+        app.setUser(srManager);
+        app.setApproved(approved);
+        app.setLevel(3);
+        approverRepo.save(app);
+        
+        if (!approved) {
+            batch.setStatus("REJECTED");
+        } else {
+            batch.setStatus("APPROVED");
+        }
+        batchRepo.save(batch);
+    }
 }
 
-@Entity
-public class User {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-    private String username;
-    private String password;
-    private String role;
-    
-    public User() {}
-    
-    // Getters and Setters
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
-    public String getUsername() { return username; }
-    public void setUsername(String username) { this.username = username; }
-    public String getPassword() { return password; }
-    public void setPassword(String password) { this.password = password; }
-    public String getRole() { return role; }
-    public void setRole(String role) { this.role = role; }
+@Repository
+public interface ApproverRepository extends JpaRepository<Approver, Long> {
+    Approver findByBatchAndUser(Batch batch, User user);
 }
-
-@Entity
-public class Approver {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-    
-    @ManyToOne
-    private Batch batch;
-    
-    @ManyToOne
-    private User user;
-    
-    private boolean approved;
-    private String comment;
-    private int level;
-    
-    public Approver() {}
-    
-    // Getters and Setters
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
-    public Batch getBatch() { return batch; }
-    public void setBatch(Batch batch) { this.batch = batch; }
-    public User getUser() { return user; }
-    public void setUser(User user) { this.user = user; }
-    public boolean isApproved() { return approved; }
-    public void setApproved(boolean approved) { this.approved = approved; }
-    public String getComment() { return comment; }
-    public void setComment(String comment) { this.comment = comment; }
-    public int getLevel() { return level; }
-    public void setLevel(int level) { this.level = level; }
-}
-
-// ========== REPOSITORIES ==========
 
 @Repository
 public interface BatchRepository extends JpaRepository<Batch, Long> {
     List<Batch> findByStatus(String status);
 }
 
-@Repository
-public interface UserRepository extends JpaRepository<User, Long> {
-    User findByUsername(String username);
-}
-
-@Repository
-public interface ApproverRepository extends JpaRepository<Approver, Long> {
-    List<Approver> findByBatch(Batch batch);
-}
-
-// ========== CONTROLLER ==========
-
 @RestController
+@RequestMapping("/api/approval")
 public class ApprovalController {
     
     @Autowired
-    private ApprovalService approvalService;
+    private ApproverService approverService;
     
     @Autowired
-    private UserRepository userRepo;
+    private UserRepository userRepository;
+    
+    // ===== APPROVER ENDPOINTS =====
     
     @GetMapping("/approver/batches")
     public List<Batch> getPendingBatches() {
-        return approvalService.getPendingBatchesForApprover();
+        return approverService.getPendingBatches();
     }
     
     @PostMapping("/approver/decision")
     public String approverDecision(@RequestParam List<Long> batchIds, 
-                                   @RequestParam Long approverId, 
+                                  @RequestParam Long approverId,
+                                  @RequestParam boolean approved) {
+        User approver = userRepository.findById(approverId)
+                .orElseThrow(() -> new RuntimeException("Approver not found"));
+        
+        approverService.approverDecision(batchIds, approver, approved);
+        return approved ? "Batches approved" : "Batches rejected";
+    }
+    
+    // ===== JR MANAGER ENDPOINTS =====
+    
+    @GetMapping("/jr-manager/next-batch")
+    public Batch getNextBatchForJrManager() {
+        return approverService.getNextBatchForJrManager();
+    }
+    
+    @PostMapping("/jr-manager/decision")
+    public String jrManagerDecision(@RequestParam Long batchId, 
+                                   @RequestParam Long jrManagerId,
                                    @RequestParam boolean approved) {
-        User approver = userRepo.findById(approverId).get();
-        approvalService.approverDecision(batchIds, approver, approved);
-        return approved ? "Approved!" : "Rejected!";
+        User jrManager = userRepository.findById(jrManagerId)
+                .orElseThrow(() -> new RuntimeException("Jr Manager not found"));
+        
+        approverService.jrManagerDecision(batchId, jrManager, approved);
+        return approved ? "Batch approved by Jr Manager" : "Batch rejected by Jr Manager";
     }
     
-    @GetMapping("/manager/{managerId}/next-batch")
-    public Batch getNextBatch(@PathVariable Long managerId) {
-        User manager = userRepo.findById(managerId).get();
-        return approvalService.getNextBatchForManager(manager);
+    // ===== SR MANAGER ENDPOINTS =====
+    
+    @GetMapping("/sr-manager/next-batch")
+    public Batch getNextBatchForSrManager() {
+        return approverService.getNextBatchForSrManager();
     }
     
-    @PostMapping("/manager/decision")
-    public String managerDecision(@RequestParam Long batchId,
-                                  @RequestParam Long managerId,
-                                  @RequestParam String password,
-                                  @RequestParam boolean approved,
-                                  @RequestParam String comment) {
-        User manager = userRepo.findById(managerId).get();
-        approvalService.managerDecision(batchId, manager, password, approved, comment);
-        return approved ? "Approved!" : "Rejected!";
+    @PostMapping("/sr-manager/decision")
+    public String srManagerDecision(@RequestParam Long batchId, 
+                                   @RequestParam Long srManagerId,
+                                   @RequestParam boolean approved) {
+        User srManager = userRepository.findById(srManagerId)
+                .orElseThrow(() -> new RuntimeException("Sr Manager not found"));
+        
+        approverService.srManagerDecision(batchId, srManager, approved);
+        return approved ? "Batch approved by Sr Manager" : "Batch rejected by Sr Manager";
     }
 }
