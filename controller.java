@@ -1,95 +1,115 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect } from "react";
+import { Table, Form, Button, Card } from "react-bootstrap";
 import axios from "axios";
-import * as XLSX from "xlsx";
-import { jsPDF } from "jspdf";
-import autoTable from "jspdf-autotable";
-import HeaderRow from "./HeaderRow";
-import FilterSections from "./FilterSections";
-import BatchTable from "./BatchTable";
 
-export default function FilterImplementation() {
-  const [filters, setFilters] = useState({
-    searchTerm: "",
-    batchId: "",
-    currency: "",
-    amountRange: "",
-  });
+export default function BatchTable({ batches, setBatches }) {
+  const [selected, setSelected] = useState([]);
 
-  const [batches, setBatches] = useState([]);
-  const token = localStorage.getItem("token"); // 👈 from login
-
-  // ✅ Fetch batches only here
+  // ✅ Fetch batches
   useEffect(() => {
+    const token = localStorage.getItem("token");
     axios
       .get("http://localhost:8080/api/approver/batches", {
         headers: { Authorization: `Bearer ${token}` },
       })
       .then((res) => setBatches(res.data))
-      .catch((err) => console.error("error fetching batches", err));
-  }, [token]);
+      .catch((err) => console.error("Error fetching batches:", err));
+  }, [setBatches]);
 
-  // ✅ Apply filters
-  const filteredBatches = useMemo(() => {
-    return batches.filter((batch) => {
-      const { searchTerm, batchId, currency, amountRange } = filters;
-
-      if (
-        searchTerm &&
-        !(
-          batch.batchName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          batch.createdBy?.userId
-            ?.toLowerCase()
-            .includes(searchTerm.toLowerCase())
-        )
-      ) {
-        return false;
-      }
-
-      if (batchId && !batch.batchId.toString().includes(batchId)) return false;
-
-      if (currency && batch.currency !== currency) return false;
-
-      if (amountRange) {
-        const min = parseFloat(amountRange);
-        if (!isNaN(min) && batch.totAmt < min) return false;
-      }
-
-      return true;
-    });
-  }, [filters, batches]);
-
-  // ✅ Export as PDF
-  const exportAsPdf = () => {
-    const doc = new jsPDF();
-    doc.text("Batches Report", 14, 18);
-
-    autoTable(doc, {
-      head: [["Batch ID", "Batch Name", "Created By", "Currency", "Amount"]],
-      body: filteredBatches.map((row) => [
-        row.batchId,
-        row.batchName,
-        row.createdBy?.userId,
-        row.currency,
-        row.totAmt,
-      ]),
-    });
-
-    doc.save("batches.pdf");
+  // ✅ Select / Deselect
+  const toggleSelect = (id) => {
+    setSelected((prev) =>
+      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+    );
   };
 
-  // ✅ Export as Excel
-  const exportAsExcel = () => {
-    const worksheet = XLSX.utils.json_to_sheet(filteredBatches);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Batches");
-    XLSX.writeFile(workbook, "batches.xlsx");
+  // ✅ Approve / Reject with confirmation
+  const handleDecision = async (approved) => {
+    if (!selected.length) return;
+
+    const action = approved ? "approve" : "reject";
+    const confirmAction = window.confirm(
+      `Are you sure you want to ${action} batches: ${selected.join(", ")}?`
+    );
+    if (!confirmAction) return;
+
+    const token = localStorage.getItem("token");
+    const approverId = localStorage.getItem("approverId");
+
+    try {
+      await axios.post(
+        "http://localhost:8080/api/approver/decision",
+        null,
+        {
+          params: {
+            batchIds: selected.join(","),
+            approverid: approverId,
+            approved: approved,
+          },
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+
+      alert(`${approved ? "✅ Approved" : "❌ Rejected"} batches successfully!`);
+      setBatches((prev) => prev.filter((b) => !selected.includes(b.batchId)));
+      setSelected([]);
+    } catch (err) {
+      console.error("Error submitting decision:", err);
+      alert("Failed to update batches");
+    }
   };
 
   return (
-    <div>
-      <HeaderRow exportAsPdf={exportAsPdf} exportAsExcel={exportAsExcel} />
-      <FilterSections filters={filters} setFilters={setFilters} />
-      <BatchTable batches={filteredBatches} setBatches={setBatches} />
-    </div>
+    <Card className="p-3">
+      <h4>Pending Batches</h4>
+      <Table striped bordered hover responsive>
+        <thead>
+          <tr>
+            <th>Select</th>
+            <th>Batch Reference</th>
+            <th>Name</th>
+            <th># Payments</th>
+            <th>Amount</th>
+            <th>Currency</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {batches.map((batch) => (
+            <tr key={batch.batchId}>
+              <td>
+                <Form.Check
+                  type="checkbox"
+                  checked={selected.includes(batch.batchId)}
+                  onChange={() => toggleSelect(batch.batchId)}
+                />
+              </td>
+              <td>{batch.yourRef}</td>
+              <td>{batch.batchName}</td>
+              <td>{batch.numOfPayments}</td>
+              <td>₹{batch.totAmt}</td>
+              <td>{batch.currency}</td>
+              <td>{batch.status}</td>
+            </tr>
+          ))}
+        </tbody>
+      </Table>
+
+      <Button
+        variant="success"
+        onClick={() => handleDecision(true)}
+        disabled={!selected.length}
+        className="me-2"
+      >
+        Approve
+      </Button>
+      <Button
+        variant="danger"
+        onClick={() => handleDecision(false)}
+        disabled={!selected.length}
+      >
+        Reject
+      </Button>
+    </Card>
   );
 }
