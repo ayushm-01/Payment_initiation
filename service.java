@@ -6,16 +6,20 @@ import axios from "axios";
 function BatchTable() {
   const [batches, setBatches] = useState([]);
   const [selected, setSelected] = useState([]);
+  const token = localStorage.getItem("token"); // 👈 store token after login
+  const approverId = localStorage.getItem("approverId"); // 👈 store approverId after login
 
-  // Fetch batches from backend
+  // Fetch batches
   useEffect(() => {
     axios
-      .get("http://localhost:8080/api/approver/batches")
+      .get("http://localhost:8080/api/approver/batches", {
+        headers: { Authorization: `Bearer ${token}` },
+      })
       .then((res) => setBatches(res.data))
       .catch((err) => console.error("Error fetching batches:", err));
-  }, []);
+  }, [token]);
 
-  // Keep selected valid if list updates
+  // keep selected valid if list updates
   useEffect(() => {
     setSelected((prev) =>
       prev.filter((id) => batches.some((b) => b.batchId === id))
@@ -36,13 +40,18 @@ function BatchTable() {
     }
   };
 
-  // Call backend for Accept/Reject
+  // Accept / Reject
   const handleDecision = async (approved) => {
     try {
-      await axios.post("http://localhost:8080/api/approver/decision", {
-        approverId: 1, // TODO: replace with logged-in approverId
-        batchIds: selected,
+      const params = {
+        batchIds: selected.join(","), // multiple batchIds allowed
+        approverid: approverId,
         approved: approved,
+      };
+
+      await axios.post("http://localhost:8080/api/approver/decision", null, {
+        params,
+        headers: { Authorization: `Bearer ${token}` },
       });
 
       alert(
@@ -51,8 +60,10 @@ function BatchTable() {
           : `❌ Rejected batches: ${selected.join(", ")}`
       );
 
-      // Refresh list after decision
-      const res = await axios.get("http://localhost:8080/api/approver/batches");
+      // Refresh list
+      const res = await axios.get("http://localhost:8080/api/approver/batches", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       setBatches(res.data);
       setSelected([]);
     } catch (err) {
