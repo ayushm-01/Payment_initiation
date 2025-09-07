@@ -1,143 +1,109 @@
 import React, { useState, useEffect } from "react";
-import "bootstrap/dist/css/bootstrap.min.css";
-import { Button, Table, Form, Card } from "react-bootstrap";
+import { Table, Form, Button } from "react-bootstrap";
 import axios from "axios";
 
-function BatchTable({ batches, setBatches }) {
+export default function BatchTable() {
+  const [batches, setBatches] = useState([]);
   const [selected, setSelected] = useState([]);
-  const token = localStorage.getItem("token"); 
-  const approverId = localStorage.getItem("approverId"); 
 
-  // ✅ keep selected valid when list changes
+  // Fetch pending batches
   useEffect(() => {
-    setSelected((prev) =>
-      prev.filter((id) => batches.some((b) => b.batchId === id))
-    );
-  }, [batches]);
+    const token = localStorage.getItem("token");
+    axios
+      .get("http://localhost:8080/api/approver/batches", {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      .then((res) => setBatches(res.data))
+      .catch((err) => console.error("Error fetching batches:", err));
+  }, []);
 
-  const handleSelected = (id) => {
+  // Select / Deselect
+  const toggleSelect = (id) => {
     setSelected((prev) =>
-      prev.includes(id) ? prev.filter((sid) => sid !== id) : [...prev, id]
+      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
     );
   };
 
-  const handleAll = () => {
-    if (selected.length === batches.length) {
-      setSelected([]);
-    } else {
-      setSelected(batches.map((b) => b.batchId));
-    }
-  };
-
-  // ✅ Accept / Reject
+  // Approve / Reject with confirmation
   const handleDecision = async (approved) => {
-    try {
-      const params = {
-        batchIds: selected.join(","), 
-        approverid: approverId,
-        approved: approved,
-      };
+    if (selected.length === 0) return;
 
-      await axios.post("http://localhost:8080/api/approver/decision", null, {
-        params,
-        headers: { Authorization: `Bearer ${token}` },
-      });
+    const action = approved ? "approve" : "reject";
+    const confirm = window.confirm(
+      `Are you sure you want to ${action} the selected batches: ${selected.join(", ")}?`
+    );
+    if (!confirm) return;
 
-      alert(
-        approved
-          ? `✅ Accepted batches: ${selected.join(", ")}`
-          : `❌ Rejected batches: ${selected.join(", ")}`
-      );
+    const token = localStorage.getItem("token");
+    const approverId = localStorage.getItem("approverId");
 
-      // Refresh parent data
-      const res = await axios.get("http://localhost:8080/api/approver/batches", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setBatches(res.data);
-      setSelected([]);
-    } catch (err) {
-      console.error("Error submitting decision:", err);
-      alert("Failed to update decision");
+    for (const id of selected) {
+      try {
+        await axios.post(
+          "http://localhost:8080/api/approver/decision",
+          { approverId, batchId: id, approved },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+      } catch (err) {
+        console.error("Error approving/rejecting:", err);
+      }
     }
+
+    // Refresh table after action
+    setBatches((prev) => prev.filter((b) => !selected.includes(b.id)));
+    setSelected([]);
   };
 
   return (
-    <Card className="border-0 rounded-4">
-      <Card.Body>
-        <div className="d-flex justify-content-between align-items-center mb-3">
-          <h4 className="fw-bold m-0">Batch Approval</h4>
-        </div>
-
-        <Table hover responsive borderless className="align-middle">
-          <thead className="bg-light">
-            <tr>
-              <th style={{ width: "50px" }}>
+    <div>
+      <h3>Pending Batches</h3>
+      <Table striped bordered hover>
+        <thead>
+          <tr>
+            <th>Select</th>
+            <th>Batch Reference</th>
+            <th>Name</th>
+            <th># Payments</th>
+            <th>Amount</th>
+            <th>Currency</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {batches.map((batch) => (
+            <tr key={batch.id}>
+              <td>
                 <Form.Check
                   type="checkbox"
-                  checked={selected.length === batches.length && batches.length > 0}
-                  onChange={handleAll}
+                  checked={selected.includes(batch.id)}
+                  onChange={() => toggleSelect(batch.id)}
                 />
-              </th>
-              <th className="fw-semibold">Batch Reference</th>
-              <th className="fw-semibold">Batch Name</th>
-              <th className="fw-semibold">Created By</th>
-              <th className="fw-semibold text-center"># Payments</th>
-              <th className="fw-semibold text-end">Total Amount</th>
-              <th className="fw-semibold text-center">Currency</th>
-              <th className="fw-semibold">Status</th>
+              </td>
+              <td>{batch.yourRef}</td>
+              <td>{batch.batchName}</td>
+              <td>{batch.numOfPayments}</td>
+              <td>₹{batch.totAmt}</td>
+              <td>{batch.currency}</td>
+              <td>{batch.status}</td>
             </tr>
-          </thead>
-          <tbody>
-            {batches.map((batch) => (
-              <tr
-                key={batch.batchId}
-                className={selected.includes(batch.batchId) ? "table-active" : ""}
-                style={{ cursor: "pointer" }}
-                onClick={() => handleSelected(batch.batchId)}
-              >
-                <td>
-                  <Form.Check
-                    type="checkbox"
-                    checked={selected.includes(batch.batchId)}
-                    onChange={() => handleSelected(batch.batchId)}
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                </td>
-                <td className="fw-medium">{batch.yourRef}</td>
-                <td>{batch.batchName}</td>
-                <td>{batch.createdBy?.userId}</td>
-                <td className="text-center">{batch.numOfPayments}</td>
-                <td className="text-end text-success fw-semibold">
-                  ₹{batch.totAmt?.toLocaleString()}
-                </td>
-                <td className="text-center">{batch.currency}</td>
-                <td>{batch.status}</td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
+          ))}
+        </tbody>
+      </Table>
 
-        <div className="d-flex justify-content-between align-items-center mt-3">
-          <div className="d-flex gap-2">
-            <Button
-              variant="outline-success"
-              onClick={() => handleDecision(true)}
-              disabled={!selected.length}
-            >
-              ✅ Accept
-            </Button>
-            <Button
-              variant="outline-danger"
-              onClick={() => handleDecision(false)}
-              disabled={!selected.length}
-            >
-              ❌ Reject
-            </Button>
-          </div>
-        </div>
-      </Card.Body>
-    </Card>
+      <Button
+        variant="success"
+        onClick={() => handleDecision(true)}
+        disabled={selected.length === 0}
+      >
+        Approve
+      </Button>{" "}
+      <Button
+        variant="danger"
+        onClick={() => handleDecision(false)}
+        disabled={selected.length === 0}
+      >
+        Reject
+      </Button>
+    </div>
   );
 }
-
-export default BatchTable;
