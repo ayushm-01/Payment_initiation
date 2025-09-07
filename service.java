@@ -3,23 +3,12 @@ import "bootstrap/dist/css/bootstrap.min.css";
 import { Button, Table, Form, Card } from "react-bootstrap";
 import axios from "axios";
 
-function BatchTable() {
-  const [batches, setBatches] = useState([]);
+function BatchTable({ batches, setBatches }) {
   const [selected, setSelected] = useState([]);
-  const token = localStorage.getItem("token"); // 👈 store token after login
-  const approverId = localStorage.getItem("approverId"); // 👈 store approverId after login
+  const token = localStorage.getItem("token"); 
+  const approverId = localStorage.getItem("approverId"); 
 
-  // Fetch batches
-  useEffect(() => {
-    axios
-      .get("http://localhost:8080/api/approver/batches", {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      .then((res) => setBatches(res.data))
-      .catch((err) => console.error("Error fetching batches:", err));
-  }, [token]);
-
-  // keep selected valid if list updates
+  // ✅ keep selected valid when list changes
   useEffect(() => {
     setSelected((prev) =>
       prev.filter((id) => batches.some((b) => b.batchId === id))
@@ -40,11 +29,11 @@ function BatchTable() {
     }
   };
 
-  // Accept / Reject
+  // ✅ Accept / Reject
   const handleDecision = async (approved) => {
     try {
       const params = {
-        batchIds: selected.join(","), // multiple batchIds allowed
+        batchIds: selected.join(","), 
         approverid: approverId,
         approved: approved,
       };
@@ -60,7 +49,7 @@ function BatchTable() {
           : `❌ Rejected batches: ${selected.join(", ")}`
       );
 
-      // Refresh list
+      // Refresh parent data
       const res = await axios.get("http://localhost:8080/api/approver/batches", {
         headers: { Authorization: `Bearer ${token}` },
       });
