@@ -1,123 +1,143 @@
-@Service
-public class ApprovalService {
-    
-    @Autowired private BatchRepository batchRepo;
-    @Autowired private ApproverRepository approverRepo;
-    
-    // Get batches for approver to see
-    public List<Batch> getPendingBatchesForApprover() {
-        return batchRepo.findByStatus(BatchStatus.PENDING);
+import React, { useState, useEffect } from "react";
+import "bootstrap/dist/css/bootstrap.min.css";
+import { Button, Table, Form, Card } from "react-bootstrap";
+import axios from "axios";
+
+function BatchTable() {
+  const [batches, setBatches] = useState([]);
+  const [selected, setSelected] = useState([]);
+
+  // Fetch batches from backend
+  useEffect(() => {
+    axios
+      .get("http://localhost:8080/api/approver/batches")
+      .then((res) => setBatches(res.data))
+      .catch((err) => console.error("Error fetching batches:", err));
+  }, []);
+
+  // Keep selected valid if list updates
+  useEffect(() => {
+    setSelected((prev) =>
+      prev.filter((id) => batches.some((b) => b.batchId === id))
+    );
+  }, [batches]);
+
+  const handleSelected = (id) => {
+    setSelected((prev) =>
+      prev.includes(id) ? prev.filter((sid) => sid !== id) : [...prev, id]
+    );
+  };
+
+  const handleAll = () => {
+    if (selected.length === batches.length) {
+      setSelected([]);
+    } else {
+      setSelected(batches.map((b) => b.batchId));
     }
-    
-    // Approver decision on selected batches (single or multiple)
-    // batchIds comes from frontend - user selects checkboxes in table
-    public void approverDecision(List<Long> batchIds, User approver, boolean approved) {
-        for (Long batchId : batchIds) {
-            Batch batch = batchRepo.findById(batchId)
-                    .orElseThrow(() -> new RuntimeException("Batch not found"));
-            
-            // Check if approver already acted
-            List<Approver> existing = approverRepo.findByBatch(batch);
-            for (Approver a : existing) {
-                if (a.getUser().getId().equals(approver.getId()) && a.getLevel() == 1) {
-                    throw new RuntimeException("Already acted on batch: " + batchId);
-                }
-            }
-            
-            // Save approver action
-            Approver app = new Approver();
-            app.setBatch(batch);
-            app.setUser(approver);
-            app.setApproved(approved);
-            app.setLevel(1);
-            approverRepo.save(app);
-            
-            // Update batch status
-            if (approved) {
-                batch.setStatus(BatchStatus.UNDER_MANAGER_REVIEW);
-            } else {
-                batch.setStatus(BatchStatus.REJECTED);
-            }
-            batchRepo.save(batch);
-        }
+  };
+
+  // Call backend for Accept/Reject
+  const handleDecision = async (approved) => {
+    try {
+      await axios.post("http://localhost:8080/api/approver/decision", {
+        approverId: 1, // TODO: replace with logged-in approverId
+        batchIds: selected,
+        approved: approved,
+      });
+
+      alert(
+        approved
+          ? `✅ Accepted batches: ${selected.join(", ")}`
+          : `❌ Rejected batches: ${selected.join(", ")}`
+      );
+
+      // Refresh list after decision
+      const res = await axios.get("http://localhost:8080/api/approver/batches");
+      setBatches(res.data);
+      setSelected([]);
+    } catch (err) {
+      console.error("Error submitting decision:", err);
+      alert("Failed to update decision");
     }
-    
-    // Get next batch for manager
-    public Batch getNextBatchForManager(User manager) {
-        List<Batch> pendingBatches = batchRepo.findByStatus(BatchStatus.UNDER_MANAGER_REVIEW);
-        
-        for (Batch batch : pendingBatches) {
-            // Check if this manager already acted on this batch
-            List<Approver> existing = approverRepo.findByBatch(batch);
-            boolean alreadyActed = false;
-            
-            for (Approver a : existing) {
-                if (a.getUser().getId().equals(manager.getId()) && a.getLevel() >= 2) {
-                    alreadyActed = true;
-                    break;
-                }
-            }
-            
-            if (!alreadyActed) {
-                return batch; // Return first batch this manager hasn't acted on
-            }
-        }
-        return null; // No batches for this manager
-    }
-    
-    // Manager decision
-    public void managerDecision(Long batchId, User manager, String password, boolean approved, String comment) {
-        // Check password
-        if (!password.equals(manager.getPassword())) {
-            throw new RuntimeException("Invalid password");
-        }
-        
-        Batch batch = batchRepo.findById(batchId)
-                .orElseThrow(() -> new RuntimeException("Batch not found"));
-        
-        // Check if manager already acted
-        List<Approver> existing = approverRepo.findByBatch(batch);
-        for (Approver a : existing) {
-            if (a.getUser().getId().equals(manager.getId()) && a.getLevel() >= 2) {
-                throw new RuntimeException("Manager already acted on this batch");
-            }
-        }
-        
-        // Save manager action
-        Approver app = new Approver();
-        app.setBatch(batch);
-        app.setUser(manager);
-        app.setApproved(approved);
-        app.setComment(comment);
-        app.setLevel(2);
-        approverRepo.save(app);
-        
-        if (!approved) {
-            batch.setStatus(BatchStatus.REJECTED);
-            batchRepo.save(batch);
-            return;
-        }
-        
-        // Count manager approvals
-        int managerApprovals = 0;
-        List<Approver> allApprovers = approverRepo.findByBatch(batch);
-        for (Approver a : allApprovers) {
-            if (a.isApproved() && a.getLevel() >= 2) {
-                managerApprovals++;
-            }
-        }
-        
-        int requiredManagers = getRequiredManagers(batch.getTotalAmount());
-        if (managerApprovals >= requiredManagers) {
-            batch.setStatus("APPROVED");
-        }
-        batchRepo.save(batch);
-    }
-    
-    // Simple method to calculate required managers
-    private int getRequiredManagers(Double amount) {
-        if (amount < 100000) return 1;      // < 1 Lakh
-        else if (amount < 1000000) return 2; // < 10 Lakh  
-        else return 3;                      // >= 10 Lakh
-    }
+  };
+
+  return (
+    <Card className="border-0 rounded-4">
+      <Card.Body>
+        <div className="d-flex justify-content-between align-items-center mb-3">
+          <h4 className="fw-bold m-0">Batch Approval</h4>
+        </div>
+
+        <Table hover responsive borderless className="align-middle">
+          <thead className="bg-light">
+            <tr>
+              <th style={{ width: "50px" }}>
+                <Form.Check
+                  type="checkbox"
+                  checked={selected.length === batches.length && batches.length > 0}
+                  onChange={handleAll}
+                />
+              </th>
+              <th className="fw-semibold">Batch Reference</th>
+              <th className="fw-semibold">Batch Name</th>
+              <th className="fw-semibold">Created By</th>
+              <th className="fw-semibold text-center"># Payments</th>
+              <th className="fw-semibold text-end">Total Amount</th>
+              <th className="fw-semibold text-center">Currency</th>
+              <th className="fw-semibold">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {batches.map((batch) => (
+              <tr
+                key={batch.batchId}
+                className={selected.includes(batch.batchId) ? "table-active" : ""}
+                style={{ cursor: "pointer" }}
+                onClick={() => handleSelected(batch.batchId)}
+              >
+                <td>
+                  <Form.Check
+                    type="checkbox"
+                    checked={selected.includes(batch.batchId)}
+                    onChange={() => handleSelected(batch.batchId)}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                </td>
+                <td className="fw-medium">{batch.yourRef}</td>
+                <td>{batch.batchName}</td>
+                <td>{batch.createdBy?.userId}</td>
+                <td className="text-center">{batch.numOfPayments}</td>
+                <td className="text-end text-success fw-semibold">
+                  ₹{batch.totAmt?.toLocaleString()}
+                </td>
+                <td className="text-center">{batch.currency}</td>
+                <td>{batch.status}</td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+
+        <div className="d-flex justify-content-between align-items-center mt-3">
+          <div className="d-flex gap-2">
+            <Button
+              variant="outline-success"
+              onClick={() => handleDecision(true)}
+              disabled={!selected.length}
+            >
+              ✅ Accept
+            </Button>
+            <Button
+              variant="outline-danger"
+              onClick={() => handleDecision(false)}
+              disabled={!selected.length}
+            >
+              ❌ Reject
+            </Button>
+          </div>
+        </div>
+      </Card.Body>
+    </Card>
+  );
 }
+
+export default BatchTable;
