@@ -3,18 +3,42 @@ import "bootstrap/dist/css/bootstrap.min.css";
 import { Card, Table, Form, Button, Alert } from "react-bootstrap";
 import axios from "axios";
 
-export default function SubmitApproval({ token, jrManagerId }) {
+export default function SubmitApproval({ token, role, userId }) {
   const [batch, setBatch] = useState(null);
   const [comments, setComments] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
 
-  // Fetch next batch for Jr Manager
+  // Determine API endpoint for fetching next batch
+  const getNextBatchUrl = () => {
+    if (role === "JrManager") return "/jr-manager/next-batch";
+    if (role === "SrManager") return "/sr-manager/next-batch";
+    if (role === "Director") return "/director/next-batch";
+    return "";
+  };
+
+  // Determine API endpoint for submitting decision
+  const getDecisionUrl = () => {
+    if (role === "JrManager") return "/jr-manager/decision";
+    if (role === "SrManager") return "/sr-manager/decision";
+    if (role === "Director") return "/director/decision";
+    return "";
+  };
+
+  // Determine param key for the logged-in user
+  const getUserIdParam = () => {
+    if (role === "JrManager") return { jrManagerId: userId };
+    if (role === "SrManager") return { srManagerId: userId };
+    if (role === "Director") return { directorId: userId };
+    return {};
+  };
+
+  // Fetch next batch
   useEffect(() => {
     const fetchNextBatch = async () => {
       try {
         const res = await axios.get(
-          "http://localhost:8080/api/jr-manager/next-batch",
+          `http://localhost:8080/api${getNextBatchUrl()}`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
         setBatch(res.data);
@@ -26,30 +50,21 @@ export default function SubmitApproval({ token, jrManagerId }) {
     fetchNextBatch();
   }, [token]);
 
-  // Approve or Reject batch
+  // Handle Approve/Reject
   const handleDecision = async (approved) => {
-    if (!password) {
-      setMessage("Please enter your password!");
-      return;
-    }
+    if (!password) return setMessage("Please enter your password!");
 
     try {
       const res = await axios.post(
-        "http://localhost:8080/api/jr-manager/decision",
+        `http://localhost:8080/api${getDecisionUrl()}`,
         null,
         {
-          params: {
-            batchIds: [batch.id],
-            jrManagerId,
-            approved,
-            password,
-            comment: comments,
-          },
+          params: { batchIds: [batch.id], approved, password, comment: comments, ...getUserIdParam() },
           headers: { Authorization: `Bearer ${token}` },
         }
       );
       setMessage(res.data);
-      setBatch(null); // Clear after decision
+      setBatch(null); // clear batch after decision
       setComments("");
       setPassword("");
     } catch (err) {
