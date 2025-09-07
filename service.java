@@ -1,109 +1,75 @@
-import React, { useState, useEffect } from "react";
-import { Table, Form, Button } from "react-bootstrap";
-import axios from "axios";
+import React, { useState, useMemo } from "react";
+import BatchTable from "./BatchTable";
+import HeaderRow from "./HeaderRow";
+import FilterSections from "./FilterSections";
+import * as XLSX from "xlsx";
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
 
-export default function BatchTable() {
+export default function FilterImplementation() {
+  const [filters, setFilters] = useState({
+    searchTerm: "",
+    batchId: "",
+    currency: "",
+    amountRange: "",
+  });
+
   const [batches, setBatches] = useState([]);
-  const [selected, setSelected] = useState([]);
 
-  // Fetch pending batches
-  useEffect(() => {
-    const token = localStorage.getItem("token");
-    axios
-      .get("http://localhost:8080/api/approver/batches", {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      .then((res) => setBatches(res.data))
-      .catch((err) => console.error("Error fetching batches:", err));
-  }, []);
+  // ✅ Apply filters
+  const filteredBatches = useMemo(() => {
+    return batches.filter((batch) => {
+      const { searchTerm, batchId, currency, amountRange } = filters;
 
-  // Select / Deselect
-  const toggleSelect = (id) => {
-    setSelected((prev) =>
-      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
-    );
+      if (
+        searchTerm &&
+        !(
+          batch.batchName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          batch.createdBy?.userId?.toLowerCase().includes(searchTerm.toLowerCase())
+        )
+      ) return false;
+
+      if (batchId && !batch.batchId.toString().includes(batchId)) return false;
+      if (currency && batch.currency !== currency) return false;
+
+      if (amountRange) {
+        const min = parseFloat(amountRange);
+        if (!isNaN(min) && batch.totAmt < min) return false;
+      }
+
+      return true;
+    });
+  }, [filters, batches]);
+
+  // ✅ Export functions
+  const exportAsPdf = () => {
+    const doc = new jsPDF();
+    doc.text("Batches Report", 14, 18);
+    autoTable(doc, {
+      head: [["Batch ID", "Batch Name", "Created By", "Currency", "Amount"]],
+      body: filteredBatches.map((row) => [
+        row.batchId,
+        row.batchName,
+        row.createdBy?.userId,
+        row.currency,
+        row.totAmt,
+      ]),
+    });
+    doc.save("batches.pdf");
   };
 
-  // Approve / Reject with confirmation
-  const handleDecision = async (approved) => {
-    if (selected.length === 0) return;
-
-    const action = approved ? "approve" : "reject";
-    const confirm = window.confirm(
-      `Are you sure you want to ${action} the selected batches: ${selected.join(", ")}?`
-    );
-    if (!confirm) return;
-
-    const token = localStorage.getItem("token");
-    const approverId = localStorage.getItem("approverId");
-
-    for (const id of selected) {
-      try {
-        await axios.post(
-          "http://localhost:8080/api/approver/decision",
-          { approverId, batchId: id, approved },
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-      } catch (err) {
-        console.error("Error approving/rejecting:", err);
-      }
-    }
-
-    // Refresh table after action
-    setBatches((prev) => prev.filter((b) => !selected.includes(b.id)));
-    setSelected([]);
+  const exportAsExcel = () => {
+    const worksheet = XLSX.utils.json_to_sheet(filteredBatches);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Batches");
+    XLSX.writeFile(workbook, "batches.xlsx");
   };
 
   return (
     <div>
-      <h3>Pending Batches</h3>
-      <Table striped bordered hover>
-        <thead>
-          <tr>
-            <th>Select</th>
-            <th>Batch Reference</th>
-            <th>Name</th>
-            <th># Payments</th>
-            <th>Amount</th>
-            <th>Currency</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {batches.map((batch) => (
-            <tr key={batch.id}>
-              <td>
-                <Form.Check
-                  type="checkbox"
-                  checked={selected.includes(batch.id)}
-                  onChange={() => toggleSelect(batch.id)}
-                />
-              </td>
-              <td>{batch.yourRef}</td>
-              <td>{batch.batchName}</td>
-              <td>{batch.numOfPayments}</td>
-              <td>₹{batch.totAmt}</td>
-              <td>{batch.currency}</td>
-              <td>{batch.status}</td>
-            </tr>
-          ))}
-        </tbody>
-      </Table>
-
-      <Button
-        variant="success"
-        onClick={() => handleDecision(true)}
-        disabled={selected.length === 0}
-      >
-        Approve
-      </Button>{" "}
-      <Button
-        variant="danger"
-        onClick={() => handleDecision(false)}
-        disabled={selected.length === 0}
-      >
-        Reject
-      </Button>
+      <HeaderRow exportAsPdf={exportAsPdf} exportAsExcel={exportAsExcel} />
+      <FilterSections filters={filters} setFilters={setFilters} />
+      <BatchTable batches={filteredBatches} setBatches={setBatches} />
     </div>
   );
 }
