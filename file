@@ -110,6 +110,14 @@ export default function SubmitApproval({ role }) {
  
   const handleDecision = async (approved) => {
     const url = getDecisionUrl();
+    console.log("=== Submitting Decision ===");
+    console.log("Role:", role);
+    console.log("Decision URL:", url);
+    console.log("Full API URL:", `/api${url}`);
+    console.log("Batch ID:", batch.batchId);
+    console.log("Approved:", approved);
+    console.log("User ID Param:", getUserIdParam());
+    
     if (!url) {
       alert("Unknown role, cannot submit decision!");
       return;
@@ -119,29 +127,44 @@ export default function SubmitApproval({ role }) {
       alert("No batch loaded to submit decision for.");
       return;
     }
+
+    if (!password.trim()) {
+      alert("Password is required!");
+      return;
+    }
  
     try {
-      await API.post(
+      const params = {
+        batchIds: [batch.batchId],
+        approved,
+        password,
+        comment: comments,
+        ...getUserIdParam(),
+      };
+      
+      console.log("Final params being sent:", params);
+      
+      const response = await API.post(
         `/api${url}`,
         null, // no body
         {
-          params: {
-            batchIds: [batch.batchId],
-            approved,
-            password,
-            comment: comments,
-            ...getUserIdParam(),
-          },
+          params: params,
           paramsSerializer: (params) => qs.stringify(params, { arrayFormat: "repeat" }),
         }
       );
+      
+      console.log("Success response:", response.data);
       alert("Batch submitted successfully!");
       setBatch(null);
       setComments("");
       setPassword("");
     } catch (err) {
-      console.error("Error submitting decision:", err);
-      alert("Failed to submit decision!");
+      console.error("=== Decision Submission Error ===");
+      console.error("Error:", err);
+      console.error("Error response:", err.response?.data);
+      console.error("Error status:", err.response?.status);
+      console.error("Error config:", err.config);
+      alert("Failed to submit decision: " + (err.response?.data?.message || err.message));
     }
   };
 
