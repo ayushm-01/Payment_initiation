@@ -1,199 +1,121 @@
 import React, { useState, useEffect } from "react";
 import "bootstrap/dist/css/bootstrap.min.css";
 import { Card, Table, Form, Button } from "react-bootstrap";
-import {jwtDecode} from "jwt-decode";
+import { jwtDecode } from "jwt-decode";
 import qs from "qs";
 import API from "../../axiosInstance";
- 
+
 export default function SubmitApproval({ role }) {
-  // safely decode token to get user id (if present)
-  const token = localStorage.getItem("jwt");
+  // Get user ID from token
   let userId = null;
-  try {
-    if (token) {
+  const token = localStorage.getItem("jwt");
+  if (token) {
+    try {
       const decoded = jwtDecode(token);
-      userId = decoded?.sub ?? null;
-    }
-  } catch (e) {
-    console.warn("Failed to decode JWT", e);
-    userId = null;
+      userId = decoded?.sub;
+    } catch {}
   }
- 
+
   const [password, setPassword] = useState("");
   const [batch, setBatch] = useState(null);
   const [comments, setComments] = useState("");
- 
-  const getNextBatchUrl = () => {
-    if (role === "jrmanager") return "/jr-manager/next-batch";
-    if (role === "srmanager") return "/sr-manager/next-batch";
-    if (role === "director") return "/director/next-batch";
-    return "";
-  };
- 
-  const getDecisionUrl = () => {
-    if (role === "jrmanager") return "/jr-manager/decision";
-    if (role === "srmanager") return "/sr-manager/decision";
-    if (role === "director") return "/director/decision";
-    return "";
-  };
- 
-  const getUserIdParam = () => {
-    if (!userId) return {};
-    if (role === "jrmanager") return { jrManagerId: userId };
-    if (role === "srmanager") return { srManagerId: userId };
-    if (role === "director") return { directorId: userId };
-    return {};
-  };
- 
+
+  // Fetch batch on role/user change
   useEffect(() => {
-    console.log("=== useEffect triggered ===");
-    console.log("Role:", role);
-    console.log("UserId:", userId);
-    
-    if (!role) {
-      console.debug("SubmitApproval: role not yet available - skipping fetch");
-      return;
-    }
+    if (role) fetchBatch();
+  }, [role, userId]);
 
-    const url = getNextBatchUrl();
-    console.log("Generated URL:", url);
-    
-    if (!url) {
-      console.warn("SubmitApproval: unknown role, can't fetch next batch:", role);
-      return;
-    }
+  const fetchBatch = async () => {
+    try {
+      let url = "";
+      let params = {};
 
-    const fetchNextBatch = async () => {
-      try {
-        const params = getUserIdParam();
-        console.log("=== About to make API call ===");
-        console.log("Full URL:", `/api${url}`);
-        console.log("Params:", params);
-        
-        const res = await API.get(`/api${url}`, {
-          params: params,
-        });
-
-        console.log("=== API Response received ===");
-        console.log("Status:", res.status);
-        console.log("Response data:", res.data);
-        console.log("Data type:", typeof res.data);
-        console.log("Is array:", Array.isArray(res.data));
-
-        // Handle the response - prioritize single object (like your Postman response)
-        if (res.data && typeof res.data === 'object' && res.data.batchId) {
-          console.log("Setting single batch object");
-          setBatch(res.data);
-        } else if (Array.isArray(res.data)) {
-          if (res.data.length > 0) {
-            console.log("Setting first batch from array");
-            setBatch(res.data[0]);
-          } else {
-            console.log("Empty array received");
-            setBatch(null);
-          }
-        } else {
-          console.log("No valid batch data, setting to null");
-          setBatch(null);
-        }
-      } catch (err) {
-        console.error("=== API Error ===");
-        console.error("Error:", err);
-        console.error("Error response:", err.response?.data);
-        console.error("Error status:", err.response?.status);
-        alert("Failed to fetch batch!");
+      if (role === "jrmanager") {
+        url = "/api/jr-manager/next-batch";
+        if (userId) params.jrManagerId = userId;
+      } else if (role === "srmanager") {
+        url = "/api/sr-manager/next-batch";
+        if (userId) params.srManagerId = userId;
+      } else if (role === "director") {
+        url = "/api/director/next-batch";
+        if (userId) params.directorId = userId;
       }
-    };
 
-    fetchNextBatch();
-  }, [role, userId]); // Added userId to dependencies
- 
-  const handleDecision = async (approved) => {
-    const url = getDecisionUrl();
-    console.log("=== Submitting Decision ===");
-    console.log("Role:", role);
-    console.log("Decision URL:", url);
-    console.log("Full API URL:", `/api${url}`);
-    console.log("Batch ID:", batch.batchId);
-    console.log("Approved:", approved);
-    console.log("User ID Param:", getUserIdParam());
-    
-    if (!url) {
-      alert("Unknown role, cannot submit decision!");
-      return;
-    }
- 
-    if (!batch) {
-      alert("No batch loaded to submit decision for.");
-      return;
-    }
+      if (!url) return;
 
+      const res = await API.get(url, { params });
+      if (res.data?.batchId) setBatch(res.data);
+      else if (Array.isArray(res.data) && res.data.length > 0) setBatch(res.data[0]);
+      else setBatch(null);
+    } catch {
+      alert("Failed to fetch batch!");
+    }
+  };
+
+  const submitDecision = async (approved) => {
     if (!password.trim()) {
       alert("Password is required!");
       return;
     }
- 
+    if (!batch) {
+      alert("No batch to submit!");
+      return;
+    }
+
     try {
-      const params = {
+      let url = "";
+      let params = {
         batchIds: [batch.batchId],
         approved,
         password,
         comment: comments,
-        ...getUserIdParam(),
       };
-      
-      console.log("Final params being sent:", params);
-      
-      const response = await API.post(
-        `/api${url}`,
-        null, // no body
-        {
-          params: params,
-          paramsSerializer: (params) => qs.stringify(params, { arrayFormat: "repeat" }),
-        }
-      );
-      
-      console.log("Success response:", response.data);
-      alert("Batch submitted successfully!");
+
+      if (role === "jrmanager") {
+        url = "/api/jr-manager/decision";
+        if (userId) params.jrManagerId = userId;
+      } else if (role === "srmanager") {
+        url = "/api/sr-manager/decision";
+        if (userId) params.srManagerId = userId;
+      } else if (role === "director") {
+        url = "/api/director/decision";
+        if (userId) params.directorId = userId;
+      }
+
+      if (!url) {
+        alert("Invalid role!");
+        return;
+      }
+
+      await API.post(url, null, {
+        params,
+        paramsSerializer: (p) => qs.stringify(p, { arrayFormat: "repeat" }),
+      });
+
+      alert("Decision submitted successfully!");
       setBatch(null);
       setComments("");
       setPassword("");
     } catch (err) {
-      console.error("=== Decision Submission Error ===");
-      console.error("Error:", err);
-      console.error("Error response:", err.response?.data);
-      console.error("Error status:", err.response?.status);
-      console.error("Error config:", err.config);
       alert("Failed to submit decision: " + (err.response?.data?.message || err.message));
     }
   };
 
-  // Debug render info
-  console.log("=== Render Debug ===");
-  console.log("Current batch state:", batch);
-  console.log("Batch is null/undefined:", !batch);
- 
-  if (!batch) return (
-    <div className="text-center mt-5">
-      <div>No pending batches.</div>
-      {/* Temporary debug info */}
-      <div style={{marginTop: '20px', padding: '10px', backgroundColor: '#f8f9fa', border: '1px solid #dee2e6'}}>
-        <strong>Debug Info:</strong><br/>
-        Role: {role}<br/>
-        UserId: {userId}<br/>
-        Batch State: {batch === null ? 'null' : 'undefined'}<br/>
-        <em>Check browser console for more details</em>
+  if (!batch) {
+    return (
+      <div className="text-center mt-5">
+        <div>No pending batches.</div>
       </div>
-    </div>
-  );
- 
+    );
+  }
+
   return (
     <div className="container mt-4">
-      {/* Batch Information */}
-      <Card className="mb-3 shadow-sm">
+      {/* Batch Info */}
+      <Card className="mb-3">
         <Card.Header className="bg-primary text-white">Batch Information</Card.Header>
         <Card.Body>
-          <Table striped bordered hover responsive>
+          <Table striped bordered hover>
             <tbody>
               <tr><th>Reference</th><td>{batch.yourRef}</td></tr>
               <tr><th>Name</th><td>{batch.batchName}</td></tr>
@@ -204,18 +126,18 @@ export default function SubmitApproval({ role }) {
           </Table>
         </Card.Body>
       </Card>
- 
+
       {/* Batch Summary */}
-      <Card className="mb-3 shadow-sm">
+      <Card className="mb-3">
         <Card.Header className="bg-primary text-white">Batch Summary</Card.Header>
         <Card.Body>
-          <Table striped bordered hover responsive>
+          <Table striped bordered hover>
             <thead>
               <tr>
-                <th>Source Account ID</th>
+                <th>Source Account</th>
                 <th>Comments</th>
-                <th># Payments</th>
-                <th>Amount</th>
+                <th>Number of Payments</th>
+                <th>Total Amount</th>
               </tr>
             </thead>
             <tbody>
@@ -229,40 +151,41 @@ export default function SubmitApproval({ role }) {
           </Table>
         </Card.Body>
       </Card>
- 
+
       {/* Approval Form */}
-      <Card className="mb-3 shadow-sm">
-        <Card.Header className="bg-primary text-white">Approval Details</Card.Header>
+      <Card className="mb-3">
+        <Card.Header className="bg-primary text-white">Make Decision</Card.Header>
         <Card.Body>
           <Form>
-            <Form.Group className="mb-2">
+            <Form.Group className="mb-3">
               <Form.Label>Comments (optional)</Form.Label>
               <Form.Control
                 as="textarea"
                 rows={2}
                 value={comments}
                 onChange={(e) => setComments(e.target.value)}
+                placeholder="Enter any comments..."
               />
             </Form.Group>
-            <Form.Group className="mb-2">
-              <Form.Label>Password</Form.Label>
+            <Form.Group className="mb-3">
+              <Form.Label>Password *</Form.Label>
               <Form.Control
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter your Password"
+                placeholder="Enter your password"
               />
             </Form.Group>
           </Form>
         </Card.Body>
       </Card>
- 
-      {/* Buttons */}
+
+      {/* Action Buttons */}
       <div className="d-flex justify-content-end gap-2 mb-4">
-        <Button variant="success" onClick={() => handleDecision(true)} disabled={!password}>
+        <Button variant="success" onClick={() => submitDecision(true)} disabled={!password}>
           Approve
         </Button>
-        <Button variant="danger" onClick={() => handleDecision(false)} disabled={!password}>
+        <Button variant="danger" onClick={() => submitDecision(false)} disabled={!password}>
           Reject
         </Button>
       </div>
